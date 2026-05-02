@@ -267,9 +267,9 @@ if predict_btn:
 
     # Lazy-load predictor (cached in session)
     @st.cache_resource(show_spinner=False)
-    def get_predictor(retrain=False):
+    def get_predictor(force_retrain=False):
         from predictor import MatchPredictor
-        return MatchPredictor(force_retrain=retrain)
+        return MatchPredictor(force_retrain=force_retrain)
 
     with st.spinner("🧠 Entraînement des modèles et analyse en cours …"):
         predictor = get_predictor(force_retrain=force_retrain)
@@ -285,6 +285,8 @@ if predict_btn:
     outcome = report["outcome"]
     conf = report["confidence"]
     conf_color = report["confidence_color"]
+    exact = report.get("exact_score", {})
+    live_stats = report.get("live_stats", {})
 
     outcome_colors = {
         "HomeWin": "#3b82f6", "Draw": "#fbbf24", "AwayWin": "#ec4899"
@@ -303,6 +305,10 @@ if predict_btn:
         <div style='font-size:1rem;color:#9ca3af;margin-bottom:1.2rem'>Analyse en {elapsed:.1f}s</div>
         <div style='font-size:3rem;font-weight:900;color:{oc}'>
             {report['outcome_emoji']} {outcome}
+        </div>
+        <div style='font-size:1.1rem;font-weight:700;color:#facc15;margin-top:0.9rem'>
+            ⚽ Score exact probable : {exact.get('scoreline', '1-1')}
+            <span style='font-size:0.85rem;color:#9ca3af'>(xG {exact.get('xg_home', 1.5)} - {exact.get('xg_away', 1.2)})</span>
         </div>
         <div style='margin-top:0.8rem'>
             <span style='background:{conf_color}22;color:{conf_color};
@@ -383,6 +389,50 @@ if predict_btn:
                 )
                 st.plotly_chart(fig_fb, use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
+
+    # ── Scorelines exactes + stats live ─────────────────────
+    col_exact, col_live = st.columns(2)
+    with col_exact:
+        top_scorelines = exact.get("top_scorelines", [])
+        rows = "".join(
+            f"<div style='display:flex;justify-content:space-between;margin-bottom:0.45rem'>"
+            f"<span style='color:#d1d5db'>{idx+1}. {s['scoreline']}</span>"
+            f"<span style='color:#facc15;font-weight:700'>{s['probability_pct']:.2f}%</span>"
+            f"</div>"
+            for idx, s in enumerate(top_scorelines[:5])
+        )
+        st.markdown(f"""
+        <div class="card">
+            <div class="card-title">🎯 Top scores exacts probables</div>
+            {rows if rows else "<span style='color:#6b7280'>Aucune estimation disponible.</span>"}
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col_live:
+        momentum_map = {"home": f"Avantage {home_team}", "away": f"Avantage {away_team}", "balanced": "Équilibré"}
+        st.markdown(f"""
+        <div class="card">
+            <div class="card-title">📡 Stats en temps réel</div>
+            <div style='color:#9ca3af;font-size:0.8rem;margin-bottom:0.8rem'>
+                Source : {live_stats.get('source', 'n/a')} · MAJ {live_stats.get('updated_at', 'n/a')}
+            </div>
+            <div style='display:flex;justify-content:space-between;margin-bottom:0.4rem'>
+                <span style='color:#9ca3af'>Δ Forme</span><span style='color:white'>{live_stats.get('form_delta', 0):+.3f}</span>
+            </div>
+            <div style='display:flex;justify-content:space-between;margin-bottom:0.4rem'>
+                <span style='color:#9ca3af'>Δ Attaque</span><span style='color:white'>{live_stats.get('attack_delta', 0):+.3f}</span>
+            </div>
+            <div style='display:flex;justify-content:space-between;margin-bottom:0.4rem'>
+                <span style='color:#9ca3af'>Δ Défense</span><span style='color:white'>{live_stats.get('defense_delta', 0):+.3f}</span>
+            </div>
+            <div style='display:flex;justify-content:space-between;margin-bottom:0.4rem'>
+                <span style='color:#9ca3af'>H2H Edge</span><span style='color:white'>{live_stats.get('h2h_home_edge', 0):+.3f}</span>
+            </div>
+            <div style='margin-top:0.8rem;color:#69db7c;font-size:0.9rem'>
+                ⚡ Momentum : {momentum_map.get(live_stats.get('momentum', 'balanced'), 'Équilibré')}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
     # ── AI Narrative ──────────────────────────────────────
     st.markdown(f"""

@@ -67,6 +67,8 @@ class ReportGenerator:
             "confidence_label": conf_label,
             "confidence_color": conf_color,
             "agreement": prediction["agreement"],
+            "exact_score": prediction.get("exact_score", {}),
+            "live_stats": match_data.get("live_stats", {}),
 
             # ── Model breakdown ─────────────────────────────────────
             "model_breakdown": prediction["model_breakdown"],
@@ -110,7 +112,7 @@ class ReportGenerator:
 
             # ── Narrative summary ────────────────────────────────────
             "summary": self._narrative(home, away, prediction, hs, as_, h2h,
-                                        top_factors, conf_label),
+                                       top_factors, conf_label),
         }
         return report
 
@@ -121,6 +123,7 @@ class ReportGenerator:
         conf = pred["confidence"]
         probs = pred["probabilities"]
         wr_diff = round((hs["win_rate"] - as_["win_rate"]) * 100, 1)
+        exact = pred.get("exact_score", {})
 
         direction = "légèrement" if abs(wr_diff) < 10 else ("nettement" if abs(wr_diff) > 20 else "")
 
@@ -140,5 +143,7 @@ class ReportGenerator:
             f"avec {conf:.1f}% de confiance "
             f"(Domicile {probs['home_win']}% · Nul {probs['draw']}% · Extérieur {probs['away_win']}%). "
             f"{home} affiche {direction} un meilleur taux de victoire ({hs['win_rate']*100:.1f}% vs {as_['win_rate']*100:.1f}%). "
+            f"Le score exact le plus probable est **{exact.get('scoreline', '1-1')}** "
+            f"(xG {exact.get('xg_home', 1.5)} - {exact.get('xg_away', 1.2)}). "
             f"Le facteur le plus décisif est **{top1}**.{h2h_part}"
         )

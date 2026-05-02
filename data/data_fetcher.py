@@ -77,9 +77,14 @@ class DataFetcher:
           - competition_context
         """
         if self.use_real_data:
-            return self._fetch_real(home_team, away_team, competition)
+            match_data = self._fetch_real(home_team, away_team, competition)
         else:
-            return self._generate_synthetic(home_team, away_team, competition)
+            match_data = self._generate_synthetic(home_team, away_team, competition)
+
+        fetched_at = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+        source = "football-data.org" if self.use_real_data else "synthetic-demo"
+        match_data["live_stats"] = self._build_live_stats(match_data, fetched_at, source)
+        return match_data
 
     # ──────────────────────────────────────────────────────────
     # Real API (football-data.org)
@@ -170,6 +175,29 @@ class DataFetcher:
 
     def _default_h2h(self):
         return {"home_wins": 2, "draws": 1, "away_wins": 2, "total": 5}
+
+    def _build_live_stats(self, match_data: dict, fetched_at: str, source: str) -> dict:
+        hs = match_data["home_stats"]
+        as_ = match_data["away_stats"]
+        h2h = match_data["h2h"]
+
+        form_delta = round(hs["form_score"] - as_["form_score"], 3)
+        attack_delta = round(hs["avg_goals_scored"] - as_["avg_goals_scored"], 3)
+        defense_delta = round(as_["avg_goals_conceded"] - hs["avg_goals_conceded"], 3)
+        h2h_total = max(h2h.get("total", 0), 1)
+        h2h_home_edge = round((h2h.get("home_wins", 0) - h2h.get("away_wins", 0)) / h2h_total, 3)
+
+        momentum = "home" if form_delta > 0.08 else ("away" if form_delta < -0.08 else "balanced")
+
+        return {
+            "source": source,
+            "updated_at": fetched_at,
+            "form_delta": form_delta,
+            "attack_delta": attack_delta,
+            "defense_delta": defense_delta,
+            "h2h_home_edge": h2h_home_edge,
+            "momentum": momentum,
+        }
 
     # ──────────────────────────────────────────────────────────
     # Synthetic data generator (demo mode)

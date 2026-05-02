@@ -15,6 +15,8 @@ VictorIA est un système de prédiction ML qui analyse des matchs de football et
 | 📊 **27 features** | Forme, Elo proxy, H2H, buts, avantage domicile |
 | 🏠 **Avantage domicile** | Intégré dans le calcul des probabilités |
 | 📡 **Données réelles** | football-data.org (optionnel, clé gratuite) |
+| ⚽ **Score exact** | Projection scoreline + top scénarios probables |
+| ⏱️ **Stats temps réel** | Δ forme/attaque/défense, edge H2H, momentum live |
 | 🔬 **Mode démo** | Données synthétiques reproductibles sans API |
 | 🌐 **Interface Web** | Streamlit dark UI avec graphes interactifs |
 
