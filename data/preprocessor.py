@@ -2,13 +2,16 @@
 preprocessor.py – Feature engineering for the ML models.
 Converts raw match data (team stats + H2H) into a normalized feature vector.
 """
+from typing import Optional
+
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
 import joblib
-from pathlib import Path
 
-SCALER_PATH = Path(__file__).parent.parent / "cache" / "scaler.pkl"
+import config
+
+SCALER_PATH = config.SCALER_PATH
 
 FEATURE_NAMES = [
     # Home team features
@@ -59,7 +62,7 @@ class Preprocessor:
     """
 
     def __init__(self):
-        self.scaler: StandardScaler | None = None
+        self.scaler: Optional[StandardScaler] = None
         if SCALER_PATH.exists():
             self.scaler = joblib.load(SCALER_PATH)
 
@@ -148,12 +151,16 @@ class Preprocessor:
         return 400 * np.log10(wr_home / wr_away)
 
     @staticmethod
-    def generate_synthetic_training_data(n_samples: int = 5000,
-                                         seed: int = 42) -> tuple[np.ndarray, np.ndarray]:
+    def generate_synthetic_training_data(
+        n_samples: int = None,
+        seed: int = 42,
+    ) -> tuple[np.ndarray, np.ndarray]:
         """
         Generates synthetic training data with realistic distributions.
         Labels: 0=HomeWin, 1=Draw, 2=AwayWin
         """
+        if n_samples is None:
+            n_samples = config.TRAINING_SAMPLES
         rng = np.random.RandomState(seed)
         prep = Preprocessor()
         X_rows = []

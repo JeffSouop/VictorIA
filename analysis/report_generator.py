@@ -7,12 +7,13 @@ from datetime import datetime
 
 FORM_EMOJI = {3: "✅", 1: "🟡", 0: "❌"}
 OUTCOME_EMOJI = {"HomeWin": "🏠", "Draw": "🤝", "AwayWin": "✈️"}
+# Seuils volontairement prudents (pas de sur-confiance)
 CONFIDENCE_LABELS = {
-    (0, 45): ("Très incertain", "#ff6b6b"),
-    (45, 60): ("Incertain", "#ffa94d"),
-    (60, 72): ("Modéré", "#ffd43b"),
-    (72, 82): ("Confiant", "#74c0fc"),
-    (82, 100): ("Très confiant", "#69db7c"),
+    (0, 50): ("Très incertain", "#ff6b6b"),
+    (50, 62): ("Incertain", "#ffa94d"),
+    (62, 74): ("Modéré", "#ffd43b"),
+    (74, 85): ("Confiant", "#74c0fc"),
+    (85, 101): ("Élevée", "#69db7c"),
 }
 
 

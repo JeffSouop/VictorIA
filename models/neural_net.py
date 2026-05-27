@@ -2,6 +2,8 @@
 neural_net.py – Keras MLP classifier for match prediction.
 Classes: 0=HomeWin, 1=Draw, 2=AwayWin
 """
+from typing import Optional
+
 import numpy as np
 import warnings
 warnings.filterwarnings("ignore")
@@ -24,7 +26,7 @@ class NeuralNetModel(BaseModel):
     def __init__(self, input_dim: int = 27):
         self.input_dim = input_dim
         self.model = None
-        self.cv_score: float | None = None
+        self.cv_score: Optional[float] = None
         self._trained = False
 
     def _build(self) -> "tf.keras.Model":

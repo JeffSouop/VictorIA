@@ -2,6 +2,8 @@
 shap_explainer.py – SHAP-based explainability for match predictions.
 Generates waterfall plots, force plots, and feature importance bars.
 """
+from typing import Optional
+
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
@@ -66,7 +68,7 @@ class SHAPExplainer:
             except Exception as e:
                 print(f"[SHAP] TreeExplainer init failed: {e}")
 
-    def get_shap_values(self, X: np.ndarray) -> np.ndarray | None:
+    def get_shap_values(self, X: np.ndarray) -> Optional[np.ndarray]:
         """Returns SHAP values matrix (n_samples, n_features, n_classes)."""
         if self.explainer is None:
             return None

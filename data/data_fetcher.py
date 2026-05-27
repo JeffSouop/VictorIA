@@ -4,6 +4,8 @@ Supports: football-data.org (real data) + synthetic demo mode.
 """
 import os
 import json
+from typing import Optional
+from difflib import get_close_matches
 import time
 import hashlib
 import requests
@@ -20,6 +22,37 @@ CACHE_DIR.mkdir(exist_ok=True)
 
 FOOTBALL_API_BASE = "https://api.football-data.org/v4"
 SPORTSDB_BASE = "https://www.thesportsdb.com/api/v1/json/3"
+
+COMPETITION_CODES = {
+    "Premier League": "PL",
+    "La Liga": "PD",
+    "Ligue 1": "FL1",
+    "Serie A": "SA",
+    "Bundesliga": "BL1",
+    "Champions League": "CL",
+}
+
+TEAM_ALIASES = {
+    "real": "Real Madrid CF",
+    "real madrid": "Real Madrid CF",
+    "madrid": "Real Madrid CF",
+    "barca": "FC Barcelona",
+    "barça": "FC Barcelona",
+    "barcelona": "FC Barcelona",
+    "osasuna": "CA Osasuna",
+    "getafe": "Getafe CF",
+    "atleti": "Club Atlético de Madrid",
+    "atletico": "Club Atlético de Madrid",
+    "atletico madrid": "Club Atlético de Madrid",
+    "psg": "Paris Saint-Germain FC",
+    "paris": "Paris Saint-Germain FC",
+    "man city": "Manchester City FC",
+    "city": "Manchester City FC",
+    "man united": "Manchester United FC",
+    "man utd": "Manchester United FC",
+    "united": "Manchester United FC",
+    "spurs": "Tottenham Hotspur FC",
+}
 
 
 def _cache_key(url: str, params: dict) -> str:
@@ -82,7 +115,10 @@ class DataFetcher:
             match_data = self._generate_synthetic(home_team, away_team, competition)
 
         fetched_at = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-        source = "football-data.org" if self.use_real_data else "synthetic-demo"
+        source = match_data.get("data_quality", {}).get(
+            "source",
+            "football-data.org" if self.use_real_data else "synthetic-demo",
+        )
         match_data["live_stats"] = self._build_live_stats(match_data, fetched_at, source)
         return match_data
 
@@ -92,27 +128,97 @@ class DataFetcher:
     def _fetch_real(self, home_team, away_team, competition):
         headers = {"X-Auth-Token": self.api_key}
         # Search for teams
-        home_id = self._find_team_id(home_team, headers)
-        away_id = self._find_team_id(away_team, headers)
+        home_match = self._find_team(home_team, headers, competition)
+        away_match = self._find_team(away_team, headers, competition)
+
+        if not home_match or not away_match:
+            missing = []
+            if not home_match:
+                missing.append(home_team)
+            if not away_match:
+                missing.append(away_team)
+            print(f"[DataFetcher] Équipe introuvable via API: {', '.join(missing)}")
+            fallback = self._generate_synthetic(home_team, away_team, competition)
+            fallback["data_quality"] = {
+                "source": "synthetic-fallback",
+                "warning": "Une ou plusieurs équipes n'ont pas été trouvées dans l'API.",
+                "missing_teams": missing,
+            }
+            return fallback
+
+        home_id = home_match["id"]
+        away_id = away_match["id"]
 
         home_stats = self._team_stats(home_id, headers)
         away_stats = self._team_stats(away_id, headers)
         h2h = self._h2h(home_id, away_id, headers)
 
         return {
-            "home_team": home_team,
-            "away_team": away_team,
+            "home_team": home_match["name"],
+            "away_team": away_match["name"],
             "competition": competition,
             "home_stats": home_stats,
             "away_stats": away_stats,
             "h2h": h2h,
+            "synthetic": False,
+            "data_quality": {
+                "source": "football-data.org",
+                "home_query": home_team,
+                "away_query": away_team,
+                "home_resolved": home_match["name"],
+                "away_resolved": away_match["name"],
+            },
         }
 
-    def _find_team_id(self, name: str, headers: dict) -> int | None:
-        data = _cached_get(f"{FOOTBALL_API_BASE}/teams",
-                           params={"name": name}, headers=headers)
-        if data and data.get("teams"):
-            return data["teams"][0]["id"]
+    def _find_team_id(self, name: str, headers: dict) -> Optional[int]:
+        team = self._find_team(name, headers, None)
+        return team["id"] if team else None
+
+    def _find_team(self, name: str, headers: dict, competition: Optional[str]) -> Optional[dict]:
+        """Resolve user input to a football-data.org team using aliases + fuzzy match."""
+        query = _normalize_team_name(name)
+        canonical = TEAM_ALIASES.get(query, name)
+        code = COMPETITION_CODES.get(competition or "")
+
+        data = None
+        if code:
+            data = _cached_get(
+                f"{FOOTBALL_API_BASE}/competitions/{code}/teams",
+                headers=headers,
+                ttl_hours=24,
+            )
+        if not data:
+            data = _cached_get(f"{FOOTBALL_API_BASE}/teams", headers=headers, ttl_hours=24)
+
+        teams = (data or {}).get("teams", [])
+        if not teams:
+            return None
+
+        canonical_norm = _normalize_team_name(canonical)
+        normalized = {
+            _normalize_team_name(team.get("name", "")): team
+            for team in teams
+        }
+
+        for candidate in (canonical_norm, query):
+            if candidate in normalized:
+                return normalized[candidate]
+
+        # Also check short names / tla values, useful for inputs like "RMA".
+        for team in teams:
+            values = [
+                team.get("name", ""),
+                team.get("shortName", ""),
+                team.get("tla", ""),
+            ]
+            if query in [_normalize_team_name(value) for value in values if value]:
+                return team
+
+        names = list(normalized.keys())
+        match = get_close_matches(canonical_norm, names, n=1, cutoff=0.55)
+        if match:
+            return normalized[match[0]]
+
         return None
 
     def _team_stats(self, team_id: int, headers: dict) -> dict:
@@ -152,6 +258,7 @@ class DataFetcher:
             "win_rate": wins / n,
             "form_score": sum(w * s for w, s in zip(
                 [0.05, 0.08, 0.10, 0.15, 0.62], reversed(form_scores[-5:]))) if form_scores else 1.5,
+            "form_last5": form_scores[-5:],
             "matches_played": n,
         }
 
@@ -160,21 +267,55 @@ class DataFetcher:
             return self._default_h2h()
         data = _cached_get(
             f"{FOOTBALL_API_BASE}/teams/{home_id}/matches",
-            params={"status": "FINISHED", "limit": 5},
+            params={"status": "FINISHED", "limit": 50},
             headers=headers
         )
-        return self._default_h2h()  # simplified
+        if not data:
+            return self._default_h2h()
+
+        home_wins = draws = away_wins = total = 0
+        for match in data.get("matches", []):
+            h_id = match["homeTeam"]["id"]
+            a_id = match["awayTeam"]["id"]
+            if {h_id, a_id} != {home_id, away_id}:
+                continue
+
+            hg = match["score"]["fullTime"]["home"]
+            ag = match["score"]["fullTime"]["away"]
+            if hg is None or ag is None:
+                continue
+
+            total += 1
+            home_goals = hg if h_id == home_id else ag
+            away_goals = ag if h_id == home_id else hg
+            if home_goals > away_goals:
+                home_wins += 1
+            elif home_goals < away_goals:
+                away_wins += 1
+            else:
+                draws += 1
+
+        if total == 0:
+            return self._default_h2h()
+        return {
+            "home_wins": home_wins,
+            "draws": draws,
+            "away_wins": away_wins,
+            "total": total,
+        }
 
     def _default_stats(self):
         return {
             "wins": 5, "draws": 2, "losses": 3,
             "goals_scored": 18, "goals_conceded": 14,
             "avg_goals_scored": 1.8, "avg_goals_conceded": 1.4,
-            "win_rate": 0.5, "form_score": 1.5, "matches_played": 10,
+            "win_rate": 0.5, "form_score": 1.5,
+            "form_last5": [3, 1, 3, 0, 3],
+            "matches_played": 10,
         }
 
     def _default_h2h(self):
-        return {"home_wins": 2, "draws": 1, "away_wins": 2, "total": 5}
+        return {"home_wins": 0, "draws": 0, "away_wins": 0, "total": 0}
 
     def _build_live_stats(self, match_data: dict, fetched_at: str, source: str) -> dict:
         hs = match_data["home_stats"]
@@ -255,3 +396,20 @@ class DataFetcher:
             },
             "synthetic": True,
         }
+
+
+def _normalize_team_name(value: str) -> str:
+    value = value.lower().strip()
+    replacements = {
+        ".": "",
+        "-": " ",
+        "_": " ",
+        " cf": "",
+        " fc": "",
+        " afc": "",
+        " club de futbol": "",
+        "football club": "",
+    }
+    for old, new in replacements.items():
+        value = value.replace(old, new)
+    return " ".join(value.split())

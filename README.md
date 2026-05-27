@@ -2,23 +2,7 @@
 
 **Prédiction de matchs sportifs par intelligence artificielle**
 
-VictorIA est un système de prédiction ML qui analyse des matchs de football et fournit des pronostics précis, explicables et accompagnés d'une analyse technique approfondie.
-
----
-
-## Fonctionnalités
-
-| Feature | Détail |
-|---|---|
-| 🧠 **3 modèles ML** | XGBoost · Random Forest · Réseau de neurones |
-| 🔍 **Explainability SHAP** | Waterfall chart · Top facteurs décisifs |
-| 📊 **27 features** | Forme, Elo proxy, H2H, buts, avantage domicile |
-| 🏠 **Avantage domicile** | Intégré dans le calcul des probabilités |
-| 📡 **Données réelles** | football-data.org (optionnel, clé gratuite) |
-| ⚽ **Score exact** | Projection scoreline + top scénarios probables |
-| ⏱️ **Stats temps réel** | Δ forme/attaque/défense, edge H2H, momentum live |
-| 🔬 **Mode démo** | Données synthétiques reproductibles sans API |
-| 🌐 **Interface Web** | Streamlit dark UI avec graphes interactifs |
+VictorIA analyse des matchs de football et fournit des pronostics explicables (SHAP), avec une interface Streamlit.
 
 ---
 
@@ -26,14 +10,55 @@ VictorIA est un système de prédiction ML qui analyse des matchs de football et
 
 ```bash
 cd VictorIA
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-> **Note** : TensorFlow est optionnel. Sans lui, le réseau de neurones est désactivé et le système utilise XGBoost (40%) + Random Forest (60%).
+> **TensorFlow** n'est plus requis par défaut. Sans lui, VictorIA utilise **XGBoost (55 %) + Random Forest (45 %)**.
 
 ---
 
-## Lancement
+## API Key (requise pour l'entraînement réel)
+
+Créez un fichier `.env` à la racine :
+
+```env
+FOOTBALL_API_KEY=votre_clé_ici
+```
+
+Inscription gratuite : [football-data.org](https://www.football-data.org/client/register)
+
+---
+
+## Entraînement sur données réelles
+
+VictorIA s'entraîne par défaut sur l'**historique réel** des 5 grands championnats (PL, PD, FL1, SA, BL1) via football-data.org :
+
+```bash
+python train.py
+```
+
+Options :
+
+```bash
+python train.py --force --refresh     # re-télécharger l'historique API
+python train.py --seasons 2021 2022 2023 2024
+python train.py --competitions PL PD FL1 SA BL1
+python train.py --synthetic           # fallback debug (données factices)
+python train.py --no-eval               # plus rapide
+```
+
+Le premier entraînement réel peut prendre **plusieurs minutes** (limites API).
+
+Artefacts sauvegardés dans `cache/` :
+- `ensemble.pkl`, `scaler.pkl` — modèles
+- `metrics.json` — métriques réelles
+- `real_dataset.pkl` — cache du dataset historique
+
+---
+
+## Lancement de l'interface
 
 ```bash
 streamlit run app.py
@@ -41,20 +66,8 @@ streamlit run app.py
 
 Ouvrir : **http://localhost:8501**
 
----
-
-## API Key (optionnelle)
-
-Pour utiliser les données réelles de `football-data.org` :
-
-1. Créer un compte gratuit sur [football-data.org](https://www.football-data.org/client/register)
-2. Créer un fichier `.env` à la racine :
-
-```env
-FOOTBALL_API_KEY=votre_clé_ici
-```
-
-Sans cette clé, l'app fonctionne en **mode démo** avec des données synthétiques.
+- **Prédiction** : saisir les équipes et cliquer sur Prédire
+- **Performance** : accuracy, log loss, matrice de confusion sur vrais matchs
 
 ---
 
@@ -70,32 +83,26 @@ python -m pytest tests/ -v
 
 ```
 VictorIA/
-├── app.py                  # Streamlit UI
-├── predictor.py            # Moteur de prédiction
+├── app.py
+├── train.py
+├── predictor.py
+├── config.py
 ├── data/
-│   ├── data_fetcher.py     # API + mode démo
-│   └── preprocessor.py     # 27 features engineering
+│   ├── data_fetcher.py       # stats live pour prédiction
+│   ├── historical_fetcher.py # collecte matchs historiques API
+│   ├── stats_builder.py      # calcul stats avant-match
+│   └── preprocessor.py
+├── training/
+│   ├── pipeline.py
+│   └── real_dataset.py       # dataset réel X/y
 ├── models/
-│   ├── xgboost_model.py    # XGBoost (40%)
-│   ├── random_forest_model.py  # Random Forest (35%)
-│   ├── neural_net.py       # MLP Keras (25%)
-│   └── ensemble.py         # Soft-voting ensemble
-├── explainability/
-│   └── shap_explainer.py   # SHAP waterfall
-├── analysis/
-│   └── report_generator.py # Rapport FR + résumé IA
-└── tests/
+│   ├── ensemble.py
+│   └── evaluation.py
+└── ui/performance.py
 ```
 
 ---
 
-## Features analysées
+## Avertissement
 
-| Catégorie | Features |
-|---|---|
-| Équipe domicile | Taux victoire, buts marqués/concédés, form score, W/D/L |
-| Équipe extérieure | Mêmes métriques |
-| Comparatives | Écarts win rate, buts, forme, diff. buts |
-| Elo proxy | `400 × log10(wr_home / wr_away)` |
-| H2H | Win rates historiques, total matchs |
-| Contexte | Avantage domicile |
+VictorIA fournit des analyses **informatives**, pas des conseils de pari. Même entraîné sur de vraies données, la performance passée ne garantit pas les résultats futurs.

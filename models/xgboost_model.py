@@ -2,6 +2,8 @@
 xgboost_model.py – XGBoost multi-class classifier for match prediction.
 Classes: 0=HomeWin, 1=Draw, 2=AwayWin
 """
+from typing import Optional
+
 import numpy as np
 from xgboost import XGBClassifier
 from sklearn.model_selection import StratifiedKFold, cross_val_score
@@ -21,15 +23,16 @@ class XGBoostModel(BaseModel):
             use_label_encoder=False,
             eval_metric="mlogloss",
             random_state=42,
-            n_jobs=-1,
+            n_jobs=1,
         )
-        self.cv_score: float | None = None
+        self.cv_score: Optional[float] = None
         self._trained = False
 
     def train(self, X: np.ndarray, y: np.ndarray) -> None:
         cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-        scores = cross_val_score(self.model, X, y, cv=cv,
-                                  scoring="accuracy", n_jobs=-1)
+        scores = cross_val_score(
+            self.model, X, y, cv=cv, scoring="accuracy", n_jobs=1
+        )
         self.cv_score = float(scores.mean())
         print(f"[XGBoost] CV Accuracy: {self.cv_score:.3f} ± {scores.std():.3f}")
         self.model.fit(X, y)

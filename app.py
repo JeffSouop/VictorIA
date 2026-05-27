@@ -12,6 +12,18 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+import config
+from training.pipeline import models_are_ready, train_models
+from data.data_fetcher import DataFetcher
+from ui.performance import render_performance_page
+
+
+@st.cache_resource(show_spinner="Chargement des modèles …")
+def get_predictor(_app_version: str):
+    """Cached predictor; _app_version busts cache after code updates."""
+    from predictor import MatchPredictor
+    return MatchPredictor(force_retrain=False)
+
 # ── Page config (must be first Streamlit call) ─────────────
 st.set_page_config(
     page_title="VictorIA – Prédiction Sportive IA",
@@ -139,11 +151,54 @@ hr { border-color: #1f2937 !important; }
 """, unsafe_allow_html=True)
 
 
+def render_disclaimer():
+    st.markdown(
+        """
+        <div style="text-align:center;padding:1.5rem 0 0.5rem;color:#4b5563;font-size:0.72rem">
+        ⚠️ VictorIA fournit des analyses statistiques à titre informatif uniquement.
+        Ce n'est pas un conseil de pari. Les résultats sportifs restent imprévisibles.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+_data_probe = DataFetcher()
+_data_badge = (
+    "📡 Données API (football-data.org)"
+    if _data_probe.use_real_data
+    else "🔬 Mode démo (données synthétiques)"
+)
+_data_color = "#69db7c" if _data_probe.use_real_data else "#fbbf24"
+
+
 # ── Sidebar ────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("## ⚽ **VictorIA**")
     st.markdown("<p style='color:#6b7280;font-size:0.85rem;'>Prédiction Sportive par IA</p>",
                 unsafe_allow_html=True)
+
+    page = st.radio(
+        "Navigation",
+        ["🔮 Prédiction", "📈 Performance"],
+        label_visibility="collapsed",
+    )
+
+    st.markdown(
+        f"<div style='background:#111827;border:1px solid #374151;border-radius:8px;"
+        f"padding:0.5rem 0.75rem;font-size:0.75rem;color:{_data_color};margin:0.5rem 0'>"
+        f"{_data_badge}</div>",
+        unsafe_allow_html=True,
+    )
+
+    models_ok = models_are_ready()
+    status_color = "#69db7c" if models_ok else "#ff6b6b"
+    status_text = "✅ Modèles prêts" if models_ok else "⏳ Modèles non entraînés"
+    st.markdown(
+        f"<div style='font-size:0.72rem;color:{status_color}'>{status_text}</div>",
+        unsafe_allow_html=True,
+    )
+
     st.markdown("---")
 
     sport = st.selectbox("🏆 Sport", ["Football", "Basketball (bientôt)", "Tennis (bientôt)"])
@@ -159,19 +214,28 @@ with st.sidebar:
 
     st.markdown("---")
     with st.expander("⚙️ Options avancées"):
-        force_retrain = st.checkbox("🔄 Réentraîner les modèles", value=False)
+        force_retrain = st.checkbox(
+            "🔄 Réentraîner les modèles",
+            value=False,
+            help="Relance python train.py (1–2 min). À utiliser rarement.",
+        )
         show_model_breakdown = st.checkbox("📊 Détails des modèles", value=True)
         show_raw_features = st.checkbox("🔢 Afficher les features brutes", value=False)
 
     predict_btn = st.button("🔮 Prédire", use_container_width=True)
 
+    if st.button("🔄 Vider le cache", use_container_width=True):
+        st.cache_resource.clear()
+        st.rerun()
+
     st.markdown("---")
     st.markdown("""
     <div style='color:#4b5563;font-size:0.72rem;line-height:1.6'>
     <b>Modèles utilisés :</b><br>
-    • XGBoost (40%)<br>
-    • Random Forest (35%)<br>
-    • Réseau de neurones (25%)<br><br>
+    • XGBoost (55%)<br>
+    • Random Forest (45%)<br><br>
+    <b>Entraînement :</b><br>
+    <code>python train.py</code><br><br>
     <b>27 features analysées</b><br>
     • Forme récente<br>
     • Statistiques de buts<br>
@@ -190,6 +254,19 @@ with col_title:
                 unsafe_allow_html=True)
 
 st.markdown("---")
+
+# ── Performance page ───────────────────────────────────────
+if page.startswith("📈"):
+    render_performance_page()
+    render_disclaimer()
+    st.stop()
+
+if force_retrain and models_are_ready():
+    with st.spinner("🔄 Réentraînement sur données réelles (plusieurs minutes) …"):
+        train_models(force=True, refresh_data=True)
+    st.cache_resource.clear()
+    st.success("Modèles réentraînés. Vous pouvez prédire.")
+    st.rerun()
 
 
 # ── Helper: donut chart ────────────────────────────────────
@@ -265,14 +342,19 @@ if predict_btn:
         st.error("⚠️ Veuillez entrer les deux équipes.")
         st.stop()
 
-    # Lazy-load predictor (cached in session)
-    @st.cache_resource(show_spinner=False)
-    def get_predictor(force_retrain=False):
-        from predictor import MatchPredictor
-        return MatchPredictor(force_retrain=force_retrain)
+    if not models_are_ready():
+        st.error(
+            "⚠️ Les modèles ne sont pas encore entraînés. "
+            "Exécutez dans le terminal : `python train.py`"
+        )
+        if st.button("🚀 Entraîner maintenant (1–2 min)", type="primary"):
+            with st.spinner("Entraînement sur données réelles (plusieurs minutes) …"):
+                train_models(force=True, refresh_data=True)
+            st.cache_resource.clear()
+            st.rerun()
+        st.stop()
 
-    with st.spinner("🧠 Entraînement des modèles et analyse en cours …"):
-        predictor = get_predictor(force_retrain=force_retrain)
+    predictor = get_predictor(config.APP_VERSION)
 
     with st.spinner(f"🔍 Analyse de **{home_team}** vs **{away_team}** …"):
         t0 = time.time()
@@ -300,7 +382,7 @@ if predict_btn:
             {'&nbsp;&nbsp;🔬 données synthétiques' if report['synthetic'] else '&nbsp;&nbsp;📡 données réelles'}
         </div>
         <div style='font-size:2.2rem;font-weight:800;margin:0.8rem 0;color:white'>
-            {home_team} <span style='color:#374151'>vs</span> {away_team}
+            {report['home_stats']['team']} <span style='color:#374151'>vs</span> {report['away_stats']['team']}
         </div>
         <div style='font-size:1rem;color:#9ca3af;margin-bottom:1.2rem'>Analyse en {elapsed:.1f}s</div>
         <div style='font-size:3rem;font-weight:900;color:{oc}'>
@@ -321,6 +403,28 @@ if predict_btn:
     """, unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
+    quality = report.get("data_quality", {})
+    if quality.get("warning"):
+        st.warning(quality["warning"])
+    elif quality.get("home_resolved") or quality.get("away_resolved"):
+        st.caption(
+            "Équipes API résolues : "
+            f"{quality.get('home_query')} → {quality.get('home_resolved')} · "
+            f"{quality.get('away_query')} → {quality.get('away_resolved')}"
+        )
+    if report.get("empirical_adjusted"):
+        st.info(
+            "Prédiction recalibrée avec les statistiques réelles (forme, buts, confrontations)."
+        )
+    if (
+        report["home_stats"]["win_rate_pct"] == report["away_stats"]["win_rate_pct"]
+        and report["home_stats"]["record"] == report["away_stats"]["record"]
+        and abs(probs["home_win"] - 49.7) < 0.2
+    ):
+        st.error(
+            "⚠️ Résultat suspect (données identiques). Cliquez sur **Vider le cache** "
+            "dans la barre latérale, puis relancez la prédiction."
+        )
 
     # ── Probability row ───────────────────────────────────
     col1, col2, col3 = st.columns(3)
@@ -519,25 +623,28 @@ if predict_btn:
         st.markdown("### 🤖 Détail par modèle")
         bd = report["model_breakdown"]
         cv = report.get("cv_scores", {})
-        cols = st.columns(3)
+        cols = st.columns(max(len(bd), 1))
         model_colors = {"XGBoost": "#f59e0b", "RandomForest": "#10b981", "NeuralNet": "#8b5cf6"}
         for col, (model_name, model_probs) in zip(cols, bd.items()):
             color = model_colors.get(model_name, "#6b7280")
             cv_str = f"{cv.get(model_name, 0):.1%}" if cv.get(model_name) else "—"
+            rows_html = ""
+            for k, v in model_probs.items():
+                rows_html += f"""
+                <div style="display:flex;justify-content:space-between;margin-bottom:0.35rem">
+                    <span style="color:#9ca3af;font-size:0.8rem">{k}</span>
+                    <span style="color:white;font-weight:600;font-size:0.9rem">{v:.1f}%</span>
+                </div>
+                <div style="height:4px;background:#1f2937;border-radius:2px;margin-bottom:0.6rem">
+                    <div style="height:4px;width:{v}%;background:{color};border-radius:2px"></div>
+                </div>
+                """
             with col:
                 st.markdown(f"""
                 <div class="card" style="border-top:2px solid {color}">
                     <div class="card-title">{model_name}</div>
                     <div style="font-size:0.75rem;color:#4b5563;margin-bottom:0.6rem">CV Acc: {cv_str}</div>
-                    {''.join(f'''
-                    <div style="display:flex;justify-content:space-between;margin-bottom:0.35rem">
-                        <span style="color:#9ca3af;font-size:0.8rem">{k}</span>
-                        <span style="color:white;font-weight:600;font-size:0.9rem">{v:.1f}%</span>
-                    </div>
-                    <div style="height:4px;background:#1f2937;border-radius:2px;margin-bottom:0.6rem">
-                        <div style="height:4px;width:{v}%;background:{color};border-radius:2px"></div>
-                    </div>
-                    ''' for k,v in model_probs.items())}
+                    {rows_html}
                 </div>
                 """, unsafe_allow_html=True)
 
@@ -573,6 +680,8 @@ if predict_btn:
         df["Valeur"] = df["Valeur"].round(4)
         st.dataframe(df, use_container_width=True, hide_index=True)
 
+    render_disclaimer()
+
 else:
     # ── Welcome screen ─────────────────────────────────────
     st.markdown("""
@@ -582,13 +691,16 @@ else:
         <p style="color:#6b7280;max-width:520px;margin:0 auto;line-height:1.8">
             Entrez les deux équipes dans la barre latérale, sélectionnez la compétition,
             puis cliquez sur <b>🔮 Prédire</b> pour obtenir une analyse complète
-            alimentée par <b>3 modèles de machine learning</b> et des explications SHAP.
+            alimentée par <b>XGBoost + Random Forest</b> et des explications SHAP.
+        </p>
+        <p style="color:#fbbf24;font-size:0.85rem;margin-top:1rem">
+            Première utilisation ? Lancez <code style="background:#1f2937;padding:2px 8px;border-radius:6px">python train.py</code>
         </p>
         <div style="display:flex;justify-content:center;gap:1.5rem;margin-top:2.5rem;flex-wrap:wrap">
             <div style="background:#111827;border:1px solid #1f2937;border-radius:12px;padding:1.4rem 2rem;min-width:160px">
                 <div style="font-size:1.8rem">🧠</div>
-                <div style="color:white;font-weight:600;margin-top:0.5rem">3 Modèles ML</div>
-                <div style="color:#4b5563;font-size:0.8rem">XGBoost, RF, MLP</div>
+                <div style="color:white;font-weight:600;margin-top:0.5rem">2 Modèles ML</div>
+                <div style="color:#4b5563;font-size:0.8rem">XGBoost + Random Forest</div>
             </div>
             <div style="background:#111827;border:1px solid #1f2937;border-radius:12px;padding:1.4rem 2rem;min-width:160px">
                 <div style="font-size:1.8rem">🔍</div>
@@ -603,8 +715,9 @@ else:
             <div style="background:#111827;border:1px solid #1f2937;border-radius:12px;padding:1.4rem 2rem;min-width:160px">
                 <div style="font-size:1.8rem">⚡</div>
                 <div style="color:white;font-weight:600;margin-top:0.5rem">Analyse rapide</div>
-                <div style="color:#4b5563;font-size:0.8rem">Résultats en < 5s</div>
+                <div style="color:#4b5563;font-size:0.8rem">Résultats en &lt; 5s</div>
             </div>
         </div>
     </div>
     """, unsafe_allow_html=True)
+    render_disclaimer()
